@@ -1,0 +1,99 @@
+#!/bin/sh
+
+### INIT ######################################################################
+
+if [ -z "${1}" ] || [ "$1" = "-h" ] || [ "$1" = "--help" ] || [ "$1" = "/?" ] || [ "$1" = "?" ] ; then
+    echo "Downloads any website for offline use."
+    echo ""
+    echo "Usage: websitedownloader <dns> <path_to_save_to>"
+    echo "Do not enter the full URL, only the DNS. Without the www ."
+    echo "A new sub-folder for the website will be created automatically."
+    echo ""
+    echo "Example use: websitedownloader example.org ./my-offline-websites"
+    echo "             websitedownloader google.se ."
+    exit 0
+fi
+
+
+### VARIABLES #################################################################
+
+DOMAIN=$1
+#URL="https://www.""$DOMAIN""/"  # httrack can't handle only domain names.
+if [ -z "${2}" ] ; then
+    BASEPATH="./"
+else
+    BASEPATH=$2"/"
+fi
+
+
+### MAIN ######################################################################
+
+# figure out the actual URL
+DOMAIN_FINAL=$(curl -Ls -o /dev/null -w %"{url_effective}" "$DOMAIN")
+
+# set a proper foldername
+PATHNAME=$(printf "%s" "$DOMAIN_FINAL" | sed 's/\//-/g' | sed 's/-$//g' | tr -dc '[:alnum:]\.\-\n\r' | tr '[:upper:]' '[:lower:]' | sed -e 's/http--//g' -e 's/https--//g' )
+SAVEPATH="$BASEPATH""$PATHNAME"
+
+# info
+echo "Downloading website ""$DOMAIN_DOMAIN_FINAL"
+echo "Save path: ""$SAVEPATH"
+
+# remove old websites
+rm -rf "$SAVEPATH"
+
+wget \
+--user-agent=Mozilla \
+--no-cookies \
+--timestamping \
+--recursive \
+--convert-links \
+--no-parent \
+--adjust-extension \
+--page-requisites \
+--max-redirect=0 \
+--no-host-directories \
+"$DOMAIN_FINAL" --directory-prefix "$SAVEPATH"
+
+# This might be useful later on
+#--span-hosts \
+#--exclude-directories=blog \
+
+
+# httrack is not downloading websites properly, but we keep it here for future reference
+
+#case $2 in
+#    -httr)
+#        # Lets only download the first page from any website.
+#        httrack "$URL" -i -I -O "$BASEPATH""$PATHNAME" \
+#        --near --depth=1 --ext-depth=2 -N1 --priority=7 --max-files=10000000 \
+#        -T3 c16 \
+#        +*.bmp +*.tif +*.ico +*.jpeg +*.jpg +*.png +*.gif +*.svg \
+#        +*.css +*.js \
+#        +*.woff2 +*.woff +*.eot +*.ttf\
+#        +https://www.lfv.se/Frontend/fonts/* \
+#        -*.exe -*.7z -*.rar -*.zip -*.wav -*.mp3 -*.pdf \
+#        -ad.doubleclick.net/*
+#    ;;
+#    *)
+#
+#    ;;
+#esac
+
+#HTTrack parameters:
+#From: https://www.httrack.com/html/fcguide.html
+#-i              continue an interrupted mirror using the cache, disables "Yes/No" question
+#-I
+#-O              Output folder
+#
+#--near          get non-html files near an html file (ex: an image located outside)
+#--depth         set the mirror depth to x, 1 will only download the first page,
+#                2 will download the first page and all the links from that page.
+#--ext-depth     same as depth, for external websites.
+#-N1             Will safe files in a different structure. HTML files will be in web/ and
+#                images and other files will be  in web/images/
+#--priority=7    get html files first, then download the other files
+#--max-files     sets the maximum file size for non-HTML, 10000000 equals 10MB
+#
+#T               timeout
+#c               number of multiple connections, default is 8

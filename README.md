@@ -1,4 +1,4 @@
-# NAME
+# websitedownloader
 Downloads any website for offline use.
 
 Tested on Debian 11
