@@ -43,7 +43,9 @@ Version: $VERSION
 Section: net
 Priority: optional
 Architecture: all
-Depends: curl, wget
+Depends: curl,
+ wget,
+ zip
 Maintainer: Bodo Endres <dev@muspekaren.se>
 Description: Downloads any website for offline use
 " >"$PATH_TARGET/control"
