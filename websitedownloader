@@ -1,72 +1,127 @@
 #!/bin/sh
+# shellcheck disable=SC2039
 
 ### INIT ######################################################################
 
 if [ -z "${1}" ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
-    echo "Downloads any website for offline use."
-    echo ""
-    echo "Usage: websitedownloader <dns_domain> <path_to_save_to> [--pack]"
-    echo "Do not enter the full URL, only the DNS. Without the www ."
-    echo "A new sub-folder for the website will be created automatically."
-    echo "Add the parameter '--pack' to package the website to a zip file."
-    echo "Will also add a date stamp to the filename."
-    echo ""
-    echo "Example use: websitedownloader example.org ./my-offline-websites"
-    echo "             websitedownloader google.se ."
-    echo "             websitedownloader google.se . --pack"
-    exit 0
+	echo "Downloads any website for offline use."
+	echo ""
+	echo "Usage: websitedownloader <dns_domain> [--pack] [--cleanup]"
+	echo "Do not enter the full URL, only the DNS. Without the www ."
+	echo "A new sub-folder will be created in the current directory."
+	echo "Add the parameter '--pack' to package the website to a zip file."
+	echo "Add the parameter '--cleanup' to remove the websites folder."
+	echo "Will also add a date stamp to the filename."
+	echo ""
+	echo "Example use: websitedownloader example.org"
+	echo "             websitedownloader html.duckduckgo.com/html"
+	echo "             websitedownloader html.duckduckgo.com/html --pack"
+	echo ""
+	echo "Download multible websites from a list in a file."
+	echo "Create file that ends in .txt like this: mysites.txt"
+	echo "  example.com"
+	echo "  example.org"
+	echo "Now run: websitedownloader mysites.txt --pack"
+	exit 0
 fi
 
-### VARIABLES #################################################################
+# args
+ARG_FILE_OR_URL="$1"
+PACK="$2"
+CLEANUP="$3"
 
-DOMAIN=$1
+# print with color
+RED=$(tput setaf 1)
+GREEN=$(tput setaf 2)
+NOCOL=$(tput sgr0)
 
-SAVE_TO="$2"
-if [ -z "$SAVE_TO" ]; then
-    BASEPATH="./"
-else
-    BASEPATH=$SAVE_TO"/"
-fi
+### FUNCTIONS #################################################################
 
-PACK="$3"
+error() {
+	echo "${RED}ERROR:${NOCOL} $1"
+	exit 1
+}
+
+download_single() {
+	local DOMAIN
+	local DOMAIN_FINAL
+	local PATHNAME
+	local SAVEPATH
+	local TIMESTAMP
+	local FILE_ZIP
+
+	# args
+	DOMAIN=$1
+
+	# figure out the actual URL
+	DOMAIN_FINAL=$(curl -Ls -o /dev/null -w %"{url_effective}" "$DOMAIN") ||
+		error "find final domain: $DOMAIN_FINAL"
+
+	# set a proper foldername
+	PATHNAME=$(printf "%s" "$DOMAIN_FINAL" | sed 's/\//-/g' | sed 's/-$//g' |
+		tr -dc '[:alnum:]\.\-\n\r' | tr '[:upper:]' '[:lower:]' |
+		sed -e 's/http--//g' -e 's/https--//g')
+	if [ -z "$PATHNAME" ]; then
+		error "PATHNAME is empty"
+	fi
+	SAVEPATH="./""$PATHNAME"
+	TIMESTAMP=$(date -u +"%y%m%d")
+	FILE_ZIP="$SAVEPATH""_""$TIMESTAMP.zip"
+
+	# already downloaded
+	if [ -d "$SAVEPATH" ] || [ -f "$FILE_ZIP" ]; then
+		echo "[SKIP EXISTING] $DOMAIN"
+	else
+		echo "${GREEN}[DOWNLOAD]${NOCOL} $DOMAIN_FINAL"
+
+		# download
+		wget --no-verbose \
+			--header="Accept: text/html" \
+			--user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36" \
+			--no-cookies \
+			--timestamping \
+			--recursive \
+			--convert-links \
+			--no-parent \
+			--adjust-extension \
+			--page-requisites \
+			--max-redirect=0 \
+			--no-host-directories \
+			"$DOMAIN_FINAL" --directory-prefix "$SAVEPATH" ||
+			echo "${RED}[FAILED WGET]${NOCOL} $DOMAIN_FINAL"
+
+		if [ "$PACK" = "--pack" ]; then
+			echo "[PACKING] $DOMAIN"
+			zip -qr "$FILE_ZIP" "$SAVEPATH" ||
+				error "zip -qr $FILE_ZIP $SAVEPATH"
+		fi
+
+		if [ "$CLEANUP" = "--cleanup" ]; then
+			echo "[REMOVING] $SAVEPATH"
+			rm -r "$SAVEPATH"
+		fi
+
+	fi
+}
+
+download_multible() {
+	echo "Downloading multible sites"
+	local LIST_WEBSITES
+	LIST_WEBSITES=$(cat "$ARG_FILE_OR_URL")
+	for i in $LIST_WEBSITES; do
+		download_single "$i"
+	done
+}
 
 ### MAIN ######################################################################
 
-# figure out the actual URL
-DOMAIN_FINAL=$(curl -Ls -o /dev/null -w %"{url_effective}" "$DOMAIN") || exit 1
-
-# set a proper foldername
-PATHNAME=$(printf "%s" "$DOMAIN_FINAL" | sed 's/\//-/g' | sed 's/-$//g' |
-    tr -dc '[:alnum:]\.\-\n\r' | tr '[:upper:]' '[:lower:]' |
-    sed -e 's/http--//g' -e 's/https--//g') || exit 1
-SAVEPATH="$BASEPATH""$PATHNAME"
-
-# already downloaded
-if [ -d "$SAVEPATH" ]; then
-    echo "Folder already exists: $SAVEPATH"
-    exit 1
-fi
-
-# info
-echo "Downloading website: $DOMAIN_FINAL --> $SAVEPATH"
-
-# download
-wget -q \
-    --user-agent=Mozilla \
-    --no-cookies \
-    --timestamping \
-    --recursive \
-    --convert-links \
-    --no-parent \
-    --adjust-extension \
-    --page-requisites \
-    --max-redirect=0 \
-    --no-host-directories \
-    "$DOMAIN_FINAL" --directory-prefix "$SAVEPATH"
-
-if [ "$PACK" = "--pack" ]; then
-    TIMESTAMP=$(date -u +"%y%m%d")
-    FILE_ZIP="$SAVEPATH""_""$TIMESTAMP.zip"
-    echo "Packing website: $SAVEPATH --> $FILE_ZIP"
-    zip -qr "$FILE_ZIP" "$SAVEPATH" || exit 1
+if [ -f "$ARG_FILE_OR_URL" ]; then
+	if echo "$ARG_FILE_OR_URL" | grep -qF ".txt"; then
+		download_multible
+	else
+		echo "Failed, is not a .txt file"
+		exit 1
+	fi
+else
+	download_single "$ARG_FILE_OR_URL"
 fi
