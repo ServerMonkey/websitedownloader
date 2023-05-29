@@ -85,7 +85,7 @@ download_single() {
 			--no-parent \
 			--adjust-extension \
 			--page-requisites \
-			--max-redirect=0 \
+			--max-redirect=1 \
 			--no-host-directories \
 			"$DOMAIN_FINAL" --directory-prefix "$SAVEPATH" ||
 			echo "${RED}[FAILED WGET]${NOCOL} $DOMAIN_FINAL"
