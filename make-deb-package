@@ -45,6 +45,7 @@ Priority: optional
 Architecture: all
 Depends: curl,
  wget,
+ httrack,
  zip
 Maintainer: Bodo Endres <dev@muspekaren.se>
 Description: Downloads any website for offline use

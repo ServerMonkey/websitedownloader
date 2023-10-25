@@ -4,31 +4,31 @@
 ### INIT ######################################################################
 
 if [ -z "${1}" ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
-	echo "Downloads any website for offline use."
-	echo ""
-	echo "Usage: websitedownloader <dns_domain> [--pack] [--cleanup]"
-	echo "Do not enter the full URL, only the DNS. Without the www ."
-	echo "A new sub-folder will be created in the current directory."
-	echo "Add the parameter '--pack' to package the website to a zip file."
-	echo "Add the parameter '--cleanup' to remove the websites folder."
-	echo "Will also add a date stamp to the filename."
-	echo ""
-	echo "Example use: websitedownloader example.org"
-	echo "             websitedownloader html.duckduckgo.com/html"
-	echo "             websitedownloader html.duckduckgo.com/html --pack"
-	echo ""
-	echo "Download multible websites from a list in a file."
-	echo "Create file that ends in .txt like this: mysites.txt"
-	echo "  example.com"
-	echo "  example.org"
-	echo "Now run: websitedownloader mysites.txt --pack"
-	exit 0
+    echo "Downloads any website for offline use."
+    echo ""
+    echo "Usage: websitedownloader <dns_domain>"
+    echo "Do not enter the full URL, only the DNS. Without the www ."
+    echo "A new sub-folder will be created in the current directory."
+    echo "Will also add a date stamp to the filename."
+    echo "Automatically parses archive.org links. In the format of:"
+    echo "http(s)://web.archive.org/web/<ID>/http(s)://<WEBSITE>/"
+    echo "or"
+    echo "web.archive.org/web/<ID>/http(s)://<WEBSITE>/"
+    echo ""
+    echo "Example use: websitedownloader example.org"
+    echo "             websitedownloader html.duckduckgo.com/html"
+    echo ""
+    echo "Download multible websites from a list in a file."
+    echo "Create file that ends in .txt like this: mysites.txt"
+    echo "  example.com"
+    echo "  example.org"
+    echo "  web.archive.org/web/20141016080326/http://example.org/"
+    echo "Now run: websitedownloader mysites.txt"
+    exit 0
 fi
 
 # args
 ARG_FILE_OR_URL="$1"
-PACK="$2"
-CLEANUP="$3"
 
 # print with color
 RED=$(tput setaf 1)
@@ -38,90 +38,326 @@ NOCOL=$(tput sgr0)
 ### FUNCTIONS #################################################################
 
 error() {
-	echo "${RED}ERROR:${NOCOL} $1"
-	exit 1
+    echo "${RED}ERROR:${NOCOL} $1"
+    exit 1
+}
+
+info() {
+    echo "${GREEN}[$1]${NOCOL} $2"
+}
+
+use_wget() {
+    local OUT_PATH
+    local URL
+
+    OUT_PATH=$1
+    URL=$2
+
+    info "DOWNLOADING WITH WGET" "$OUT_PATH $URL"
+
+    wget --no-verbose \
+        --header="Accept: text/html" \
+        --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36" \
+        --no-cookies \
+        --timestamping \
+        --recursive \
+        --convert-links \
+        --no-parent \
+        --adjust-extension \
+        --page-requisites \
+        --max-redirect=1 \
+        --no-host-directories \
+        "$URL" --directory-prefix "./$OUT_PATH" ||
+        error "wget $URL"
+}
+
+use_httrack() {
+    local OUT_PATH
+    local URL
+    local OUT_PATH_NO_WWW
+    local LOG_TMP
+    local FILTER_BASE
+    local FILTER_EXT
+    local FILTER_INT
+
+    OUT_PATH=$1
+    URL=$2
+
+    info "DOWNLOADING WITH HTTRACK" "$OUT_PATH $URL"
+    LOG_TMP=$(mktemp -d)
+    echo "Httrack logs are in: $LOG_TMP/"
+
+    # old filter
+    #    "+$FILTER_INT.html" \
+    #    "+$FILTER_INT.htm" \
+    #    "+$FILTER_INT.php" \
+    #    "+$FILTER_INT.cgi" \
+
+    # N1 = merge HTML in root dir
+    # C0 = no cache
+    # I0 = no index
+    # KN = keep links
+
+    OUT_PATH_NO_WWW=$(echo "$OUT_PATH" | sed 's|^www.||g')
+    FILTER_BASE="web.archive.org/web/"
+    FILTER_EXT="*$FILTER_BASE*"
+    FILTER_INT="*$FILTER_BASE*$OUT_PATH_NO_WWW/*"
+    echo "FILTER_EXT $FILTER_EXT"
+    echo "FILTER_INT $FILTER_INT"
+    echo ""
+    httrack "$URL" \
+        '-*' \
+        "+$FILTER_INT" \
+        '-*.exe' \
+        '-*.msi' \
+        '-*.zip' \
+        '-*.rar' \
+        '-*.7z' \
+        "+$FILTER_EXT.css" \
+        "+$FILTER_EXT.js" \
+        "+$FILTER_EXT.bmp" \
+        "+$FILTER_EXT.tif" \
+        "+$FILTER_EXT.ico" \
+        "+$FILTER_EXT.jpg" \
+        "+$FILTER_EXT.jpeg" \
+        "+$FILTER_EXT.png" \
+        "+$FILTER_EXT.gif" \
+        "+$FILTER_EXT.swf" \
+        "+$FILTER_EXT.pdf" \
+        "+$FILTER_EXT.txt" \
+        "+$FILTER_EXT.rtf" \
+        "+$FILTER_EXT.doc" \
+        "+$FILTER_EXT.docx" \
+        "+$FILTER_EXT.odt" \
+        "+$FILTER_EXT.ods" \
+        "+$FILTER_EXT.xml" \
+        "+$FILTER_EXT.xlsm" \
+        "+$FILTER_EXT.xlsx" \
+        --depth=32 \
+        --ext-depth=1 \
+        --keep-alive \
+        --robots=0 \
+        --footer="" \
+        --verbose \
+        --user-agent='Mozilla/5.0 (X11;U; Linux i686; en-GB; rv:1.9.1) Gecko/20090624 Ubuntu/9.04 (jaunty) Firefox/3.5' \
+        -C0 \
+        -I0 \
+        -KN \
+        -O "./$OUT_PATH,$LOG_TMP" ||
+        error "httrack $URL"
+
+    # abort if no out folder found
+    if [ ! -d "$OUT_PATH" ]; then
+        error "no out folder found"
+    fi
+
+    rm -rf "$LOG_TMP"
+}
+
+replace_url() {
+    local OUT_PATH
+    local PATTERN
+
+    OUT_PATH=$1
+    PATTERN=$2
+
+    echo "replacing links $1 $2"
+    find "$OUT_PATH" -type f -exec sed -i "$PATTERN" {} +
+}
+
+archiveorg_replace_urls() {
+    local OUT_PATH
+    local URL_BASE
+    local DOMAIN_NO_WWW
+
+    OUT_PATH=$1
+    URL_BASE="web.archive.org/web/"
+    DOMAIN_NO_WWW=$(basename "$OUT_PATH" | sed 's|^www.||g')
+
+    # replace all static archive.org to relative links, on the current site
+    replace_url "$OUT_PATH" "s|https://$URL_BASE.*$DOMAIN_NO_WWW/||g"
+    replace_url "$OUT_PATH" "s|http://$URL_BASE.*$DOMAIN_NO_WWW/||g"
+    # replace all static archive.org links to direct links, for remote sites
+    replace_url "$OUT_PATH" "s|https://$URL_BASE.*/http|http|g"
+    replace_url "$OUT_PATH" "s|http://$URL_BASE.*/http|http|g"
+    # replace all static archive.org mailto to relative links
+    replace_url "$OUT_PATH" "s|https://$URL_BASE.*/mailto:|mailto:|g"
+    replace_url "$OUT_PATH" "s|http://$URL_BASE.*/mailto:|mailto:|g"
+    # replace all other static archive.org links to direct links
+    #    replace_url "$OUT_PATH" "s|$URL_BASE.*/http|http|g"
+    #    # remove archive.org header scripts
+    #    replace_url "$OUT_PATH" '/<script type/,/<!-- End Wayback Rewrite JS Include -->/d'
+    # remove archive.org scripts
+    #    replace_url "$OUT_PATH"  's|<script src="http://archive.org.*</script>||g'
+    # remove all comments
+    #    replace_url "$OUT_PATH" '/<!--/,/-->/d'
+}
+
+archiveorg_merge_folders() {
+    local OUT_PATH
+    local FOLDER_SRC
+    local ALL_DIRS
+    local FOLDER
+    local ALL_FILES
+    local FILE_SRC
+    local FILE_DES
+
+    OUT_PATH=$1
+    FOLDER_SRC="$OUT_PATH/web.archive.org/web/"
+
+    # merge folders
+    ALL_DIRS=$(mktemp)
+    find "$FOLDER_SRC" -mindepth 4 -type d 2>/dev/null |
+        cut -d'/' -f7- | sort -u >"$ALL_DIRS"
+    while read -r FOLDER; do
+        mkdir -vp "$OUT_PATH/$FOLDER" || error "mkdir $OUT_PATH/$FOLDER"
+    done <"$ALL_DIRS"
+    rm -f "$ALL_DIRS"
+
+    # merge files
+    ALL_FILES=$(mktemp)
+    find "$FOLDER_SRC" -mindepth 4 -type f 2>/dev/null | sort -u >"$ALL_FILES"
+    while read -r FILE_SRC; do
+        FILE_DES=$(echo "$FILE_SRC" | cut -d'/' -f7-)
+        if [ -n "$FILE_DES" ]; then
+            echo "moving $FILE_SRC" "$OUT_PATH/$FILE_DES"
+            mv "$FILE_SRC" "$OUT_PATH/$FILE_DES" || error "mv $FILE_SRC"
+        else
+            error "FILE_DES is empty in $FILE_SRC"
+        fi
+    done <"$ALL_FILES"
+    rm -f "$ALL_FILES"
+
+    # remove empty source
+    rm -rf "$OUT_PATH/web.archive.org" "$OUT_PATH/web"
 }
 
 download_single() {
-	local DOMAIN
-	local DOMAIN_FINAL
-	local PATHNAME
-	local SAVEPATH
-	local TIMESTAMP
-	local FILE_ZIP
+    local DOMAIN
+    local DOMAIN_FINAL
+    local DOMAIN_CLEAN
+    local LIST_ARCHIVEORG
+    local TIMESTAMP
+    local SAVEPATH
+    local FILE_ZIP
 
-	# args
-	DOMAIN=$1
+    # args
+    DOMAIN=$1
 
-	# figure out the actual URL
-	DOMAIN_FINAL=$(curl -Ls -o /dev/null -w %"{url_effective}" "$DOMAIN") ||
-		error "find final domain: $DOMAIN_FINAL"
+    # modify archive.org url with id_ prefix
+    if echo "$DOMAIN" | grep -qF "web.archive.org"; then
+        if echo "$DOMAIN" | grep -qF "id_/http"; then
+            echo "'id_' already in archive.org URL"
+        else
+            echo "adding 'id_' to archive.org URL"
+            DOMAIN=$(printf "%s" "$DOMAIN" | sed 's|/http|id_/http|g')
+        fi
+    fi
 
-	# set a proper foldername
-	PATHNAME=$(printf "%s" "$DOMAIN_FINAL" | sed 's/\//-/g' | sed 's/-$//g' |
-		tr -dc '[:alnum:]\.\-\n\r' | tr '[:upper:]' '[:lower:]' |
-		sed -e 's/http--//g' -e 's/https--//g')
-	if [ -z "$PATHNAME" ]; then
-		error "PATHNAME is empty"
-	fi
-	SAVEPATH="./""$PATHNAME"
-	TIMESTAMP=$(date -u +"%y%m%d")
-	FILE_ZIP="$SAVEPATH""_""$TIMESTAMP.zip"
+    # figure out the actual URL
+    DOMAIN_FINAL=$(curl -Ls -o /dev/null -w %"{url_effective}" "$DOMAIN") ||
+        error "find final domain: $DOMAIN_FINAL"
+    # verify variable
+    if [ -z "$DOMAIN_FINAL" ]; then
+        error "DOMAIN_FINAL is empty"
+    fi
+    echo "DOMAIN_FINAL $DOMAIN_FINAL"
 
-	# already downloaded
-	if [ -d "$SAVEPATH" ] || [ -f "$FILE_ZIP" ]; then
-		echo "[SKIP EXISTING] $DOMAIN"
-	else
-		echo "${GREEN}[DOWNLOAD]${NOCOL} $DOMAIN_FINAL"
+    # clean up doamin name before converting to folder name
+    DOMAIN_CLEAN=$(printf "%s" "$DOMAIN_FINAL" |
+        tr -dc '[:alnum:]\:\/\.\-\_\n\r' |
+        tr '[:upper:]' '[:lower:]' |
+        sed -e 's|^https://||g' \
+            -e 's|^http://||g' \
+            -e 's|^www.||g' \
+            -e 's|/$||g')
+    echo "DOMAIN_CLEAN $DOMAIN_CLEAN"
+    # verify variable
+    if [ -z "$DOMAIN_CLEAN" ]; then
+        error "DOMAIN_CLEAN is empty"
+    fi
 
-		# download
-		wget --no-verbose \
-			--header="Accept: text/html" \
-			--user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36" \
-			--no-cookies \
-			--timestamping \
-			--recursive \
-			--convert-links \
-			--no-parent \
-			--adjust-extension \
-			--page-requisites \
-			--max-redirect=1 \
-			--no-host-directories \
-			"$DOMAIN_FINAL" --directory-prefix "$SAVEPATH" ||
-			echo "${RED}[FAILED WGET]${NOCOL} $DOMAIN_FINAL"
+    # custom path and date for archive.org websites
+    if echo "$DOMAIN_CLEAN" | grep -qF "web.archive.org"; then
+        LIST_ARCHIVEORG=$(echo "$DOMAIN_CLEAN" |
+            sed -e 's|id_/http|/http|g' \
+                -e 's|/http| /http|g' \
+                -e 's|web.archive.org/web/||g' \
+                -e 's|/https://||g' \
+                -e 's|/http://||g' \
+                -e 's|^/||g' \
+                -e 's|/$||g' \
+                -e 's|/|-|g' \
+                -e 's|_|-|g')
+        TIMESTAMP=$(echo "$LIST_ARCHIVEORG" | awk '{print $1}')
+        SAVEPATH=$(echo "$LIST_ARCHIVEORG" | awk '{print $2}')
+    else
+        TIMESTAMP=$(date -u +"%y%m%d")
+        SAVEPATH=$(echo "$DOMAIN_CLEAN" |
+            sed -e 's|/https://||g' \
+                -e 's|/http://||g' \
+                -e 's|^/||g' \
+                -e 's|/$||g' \
+                -e 's|/|-|g' \
+                -e 's|_|-|g')
+    fi
 
-		if [ "$PACK" = "--pack" ]; then
-			echo "[PACKING] $DOMAIN"
-			zip -qr "$FILE_ZIP" "$SAVEPATH" ||
-				error "zip -qr $FILE_ZIP $SAVEPATH"
-		fi
+    # verify path variables
+    if [ -z "$TIMESTAMP" ]; then
+        error "TIMESTAMP is empty"
+    fi
+    if [ -z "$SAVEPATH" ]; then
+        error "SAVEPATH is empty"
+    fi
 
-		if [ "$CLEANUP" = "--cleanup" ]; then
-			echo "[REMOVING] $SAVEPATH"
-			rm -r "$SAVEPATH"
-		fi
+    echo "TIMESTAMP $TIMESTAMP"
+    echo "SAVEPATH $SAVEPATH"
 
-	fi
+    FILE_ZIP="$SAVEPATH""_""$TIMESTAMP.zip"
+
+    # already downloaded
+    if [ -f "$FILE_ZIP" ]; then
+        info "SKIP EXISTING ZIP" "$FILE_ZIP"
+    else
+        if echo "$DOMAIN" | grep -qF "web.archive.org"; then
+            if [ -d "$SAVEPATH" ]; then
+                info "SKIP EXISTING FOLDER" "$SAVEPATH"
+            else
+                use_httrack "$SAVEPATH" "$DOMAIN_FINAL"
+            fi
+            archiveorg_merge_folders "$SAVEPATH"
+            archiveorg_replace_urls "$SAVEPATH"
+        else
+            use_wget "$SAVEPATH" "$DOMAIN_FINAL"
+        fi
+
+        info "PACKING" "$SAVEPATH"
+        zip -qr "$FILE_ZIP" "./$SAVEPATH" ||
+            error "zip -qr $FILE_ZIP $SAVEPATH"
+
+        info "REMOVING" "$SAVEPATH"
+        rm -r "$SAVEPATH"
+    fi
 }
 
 download_multible() {
-	echo "Downloading multible sites"
-	local LIST_WEBSITES
-	LIST_WEBSITES=$(cat "$ARG_FILE_OR_URL")
-	for i in $LIST_WEBSITES; do
-		download_single "$i"
-	done
+    info "DOWNLOADING MULTIBLE SITES"
+    local LIST_WEBSITES
+    LIST_WEBSITES=$(cat "$ARG_FILE_OR_URL")
+    for i in $LIST_WEBSITES; do
+        download_single "$i"
+    done
 }
 
 ### MAIN ######################################################################
 
 if [ -f "$ARG_FILE_OR_URL" ]; then
-	if echo "$ARG_FILE_OR_URL" | grep -qF ".txt"; then
-		download_multible
-	else
-		echo "Failed, is not a .txt file"
-		exit 1
-	fi
+    if echo "$ARG_FILE_OR_URL" | grep -qF ".txt"; then
+        download_multible
+    else
+        echo "Failed, is not a .txt file"
+        exit 1
+    fi
 else
-	download_single "$ARG_FILE_OR_URL"
+    download_single "$ARG_FILE_OR_URL"
 fi
